@@ -18,8 +18,7 @@ def get_Redshift_connection(autocommit=True):
     return conn.cursor()
 
 def extract_transform(execution_date):
-    logging.info("extract and transform started")
-    print("*"*10, execution_date)
+    logging.info(f"extract and transform started : {execution_date}")
 
     box_office_url = Variable.get("box_office_url")
     service_key = Variable.get("service_key")
@@ -117,7 +116,7 @@ dag = DAG(
     start_date = datetime(2025,1,1),
     catchup=True,
     tags=['API'],
-    schedule = '0 9 * * *' # 매일 12:10
+    schedule = '0 0 * * *' # KST 오전 9시
 )
 
 
