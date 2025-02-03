@@ -59,7 +59,7 @@ def _create_table(cur, schema, table, drop_first):
                 genre varchar(100),
                 performance_count int,
                 area varchar(100),
-                created_at timestamp default CURRENT_TIMESTAMP,
+                created_at timestamp default GETDATE(),
             );
         """
     )
