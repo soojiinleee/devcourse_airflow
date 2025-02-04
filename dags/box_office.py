@@ -2,7 +2,7 @@ import logging
 import requests
 import xml.etree.ElementTree as ET
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from airflow import DAG
 from airflow.decorators import task
@@ -12,24 +12,25 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 def get_Redshift_connection(autocommit=True):
+    """ Redshift 연결 """
     hook = PostgresHook(postgres_conn_id='redshift_dev_db')
     conn = hook.get_conn()
-    conn.autocommit = autocommit
+    # conn.autocommit = autocommit      # autocommit is False by default
     return conn.cursor()
 
 def extract_transform(execution_date):
-    logging.info(f"extract and transform started : {execution_date}")
+    """ KOPIS 데이터 추출 및 XML -> [str] 으로 변환 """
+    logging.info(f"extract and transform started >> execution_date :{execution_date}")
 
     box_office_url = Variable.get("box_office_url")
     service_key = Variable.get("service_key")
-    box_office_date = (datetime.strptime(execution_date, '%Y%m%d') - timedelta(days=1)).strftime('%Y%m%d')
+    url = f"{box_office_url}?service={service_key}&stdate={execution_date}&eddate={execution_date}"
 
-    url = f"{box_office_url}?service={service_key}&stdate={box_office_date}&eddate={box_office_date}"
     response = requests.get(url)
     xml_data = response.text.strip()
-
     root = ET.fromstring(xml_data)
-    db_box_office_date = datetime.strptime(box_office_date, '%Y%m%d')
+
+    box_office_date = datetime.strptime(execution_date, '%Y%m%d').date()
     result = []
 
     for boxof in root.findall('boxof'):
@@ -40,13 +41,16 @@ def extract_transform(execution_date):
         performance_count = boxof.find('prfdtcnt').text if boxof.find('prfdtcnt') is not None else None
         area = boxof.find('area').text if boxof.find('area') is not None else None
 
-        result.append("('{}',{},'{}','{}','{}',{},'{}')".format(db_box_office_date, ranking, performance_id, performance_name, genre, performance_count, area))
+        if "'" in performance_name: # (e.g) Can't be blue
+            performance_name = performance_name.replace("'", "''")
 
-    print(result)
-    logging.info("extract and transform ended")
+        result.append(f"('{box_office_date}',{ranking},'{performance_id}','{performance_name}','{genre}',{performance_count},'{area}')")
+
+    logging.info(f"extract and transform ended >> execution_date :{execution_date}")
     return result
 
 def load(**context):
+    """ Redshift 데이터 적재 : Incremental Update"""
     logging.info("load started")
 
     schema = context["params"]["schema"]
@@ -96,7 +100,7 @@ def load(**context):
         DELETE FROM {schema}.{table};
         INSERT INTO {schema}.{table}
         SELECT box_office_date, ranking, performance_id, performance_name, genre, performance_count, area FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY box_office_date, performance_id ORDER BY created_at DESC) seq
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY box_office_date, performance_id, ranking ORDER BY created_at DESC) seq
             FROM t
         )
         WHERE seq = 1;
@@ -107,24 +111,23 @@ def load(**context):
         cur.execute("COMMIT;")
     except Exception as e:
         cur.execute("ROLLBACK;")
-        raise
+        raise   # TODO 슬랙 알림 추가
 
     logging.info("load done")
 
 dag = DAG(
-    dag_id = 'Box_office_v2',
+    dag_id = 'Box_office_v5',
     start_date = datetime(2025,1,1),
     catchup=True,
     tags=['API'],
     schedule = '0 0 * * *' # KST 오전 9시
 )
 
-
 extract_transform = PythonOperator(
     task_id='extract_transform',
     python_callable=extract_transform,
     op_kwargs={
-        "execution_date": "{{execution_date.in_timezone('Asia/Seoul').strftime('%Y%m%d')}}"
+        "execution_date": "{{execution_date.strftime('%Y%m%d')}}"
     },
     dag=dag)
 
