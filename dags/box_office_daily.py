@@ -115,7 +115,7 @@ def load(**context):
     logging.info("load done")
 
 dag = DAG(
-    dag_id = 'Box_Office_Daily_v5',
+    dag_id = 'Box_Office_Daily_v6',
     start_date = datetime(2025,1,1),
     catchup=True,
     tags=['API'],
@@ -134,7 +134,7 @@ load = PythonOperator(
     task_id='load',
     python_callable=load,
     params = {
-        'schema': 'soojiin_leee',
+        'schema': 'raw_data',
         'table': 'box_office',
     },
     dag=dag)
